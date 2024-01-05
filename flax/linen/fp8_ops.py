@@ -164,12 +164,6 @@ class Fp8DotGeneralOp(module.Module):
   amax_history_length: int = 1024
 
   def setup(self) -> None:
-    scale_args = (
-      initializers.ones_init(),
-      random.PRNGKey(0),
-      (1,),
-      jnp.float32,
-    )
     amax_history_args = (
       initializers.zeros_init(),
       random.PRNGKey(0),
@@ -187,16 +181,6 @@ class Fp8DotGeneralOp(module.Module):
       OVERWRITE_WITH_GRADIENT, 'output_grad_amax_history', *amax_history_args
     )
 
-    self.input_scale = self.variable(
-      OVERWRITE_WITH_GRADIENT, 'input_scale', *scale_args
-    )
-    self.kernel_scale = self.variable(
-      OVERWRITE_WITH_GRADIENT, 'kernel_scale', *scale_args
-    )
-    self.output_grad_scale = self.variable(
-      OVERWRITE_WITH_GRADIENT, 'output_grad_scale', *scale_args
-    )
-
   def __call__(self, *args, **kwargs):
     assert len(args) == 3
     x = args[0]
@@ -208,18 +192,9 @@ class Fp8DotGeneralOp(module.Module):
     comp_dtype = k.dtype
     x = jnp.asarray(x, comp_dtype)
 
-    x_qdq = in_qdq(
-      comp_dtype, x, self.input_scale.value, self.input_amax_history.value
-    )
-    k_qdq = in_qdq(
-      comp_dtype, k, self.kernel_scale.value, self.kernel_amax_history.value
-    )
+    x_qdq = in_qdq(comp_dtype, x, self.input_amax_history.value)
+    k_qdq = in_qdq(comp_dtype, k, self.kernel_amax_history.value)
     y_qdq = dot_general_with_precision(x_qdq, k_qdq, dimension_numbers)  # type: ignore
-    y = out_qdq(
-      comp_dtype,
-      y_qdq,
-      self.output_grad_scale.value,
-      self.output_grad_amax_history.value,
-    )
+    y = out_qdq(comp_dtype, y_qdq, self.output_grad_amax_history.value)
 
     return y  # type: ignore

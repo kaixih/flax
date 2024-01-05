@@ -1067,9 +1067,6 @@ class Fp8Test(absltest.TestCase):
           'input_amax_history': (1024,),
           'kernel_amax_history': (1024,),
           'output_grad_amax_history': (1024,),
-          'input_scale': (1,),
-          'kernel_scale': (1,),
-          'output_grad_scale': (1,),
         }
       },
     }
@@ -1111,9 +1108,9 @@ class Fp8Test(absltest.TestCase):
 
     train_fn = jax.jit(_train_loss)
 
-    scale_x, amax_history_x = jnp.ones(()), jnp.zeros((1024,))
-    scale_k, amax_history_k = jnp.ones(()), jnp.zeros((1024,))
-    scale_g, amax_history_g = jnp.ones(()), jnp.zeros((1024,))
+    amax_history_x = jnp.zeros((1024,))
+    amax_history_k = jnp.zeros((1024,))
+    amax_history_g = jnp.zeros((1024,))
     e4m3_max = jnp.finfo(jnp.float8_e4m3fn).max.astype(jnp.float32)
     e5m2_max = jnp.finfo(jnp.float8_e5m2).max.astype(jnp.float32)
 
@@ -1130,9 +1127,6 @@ class Fp8Test(absltest.TestCase):
       amax_from_history_x = jnp.max(amax_history_x, axis=0)
       amax_from_history_k = jnp.max(amax_history_k, axis=0)
       amax_from_history_g = jnp.max(amax_history_g, axis=0)
-      scale_x = fp8_ops.compute_scale(amax_from_history_x, scale_x, e4m3_max)
-      scale_k = fp8_ops.compute_scale(amax_from_history_k, scale_k, e4m3_max)
-      scale_g = fp8_ops.compute_scale(amax_from_history_g, scale_g, e5m2_max)
 
       state = train_fn(state, x, g)
 
@@ -1158,11 +1152,6 @@ class Fp8Test(absltest.TestCase):
         rtol=rtol,
         atol=atol,
       )
-
-      np.testing.assert_allclose(fp8_vars['input_scale'][0], scale_x)
-      np.testing.assert_allclose(fp8_vars['kernel_scale'][0], scale_k)
-      np.testing.assert_allclose(fp8_vars['output_grad_scale'][0], scale_g)
-
 
 if __name__ == '__main__':
   absltest.main()
