@@ -60,62 +60,68 @@ def compute_scale(amax, scale, fp8_max, margin=0):
   return 1.0 / sf
 
 
-def compute_scale_and_amax_history(x, q_dtype, scale, amax_history):
+def compute_amax_history(x, q_dtype, scale, amax_history):
   dtype_max = get_fp8_max(q_dtype, jnp.float32)
   amax_update = jnp.max(jnp.abs(x)).astype(scale.dtype)
   new_history = jnp.roll(amax_history, shift=-1, axis=0).at[0].set(amax_update)
-  amax_from_history = jnp.max(new_history, axis=0)
-  new_scale = compute_scale(amax_from_history, scale, dtype_max)
-  return new_scale, new_history
+  return new_history
 
 
 def qdq_and_return(x, q_dtype, scale, amax_history, compute_dtype):
   qx = quantize_dequantize(x, q_dtype, scale, compute_dtype)
-  new_scale, new_history = compute_scale_and_amax_history(
-    x, q_dtype, scale, amax_history
-  )
-  return qx, new_scale, new_history
+  new_history = compute_amax_history(x, q_dtype, scale, amax_history)
+  return qx, new_history
+
+
+def compute_sf_from_ah(amax_history, q_dtype):
+  dtype_max = get_fp8_max(q_dtype, jnp.float32)
+  amax_from_history = jnp.max(amax_history, axis=0)
+  scale = compute_scale(amax_from_history, 1.0, dtype_max)
+  return scale
 
 
 @partial(custom_vjp, nondiff_argnums=(0,))
-def in_qdq(compute_dtype, inp, scale, amax_history):
-  qin, _, _ = qdq_and_return(
+def in_qdq(compute_dtype, inp, amax_history):
+  scale = compute_sf_from_ah(amax_history, jnp.float8_e4m3fn)
+  qin, _ = qdq_and_return(
     inp, jnp.float8_e4m3fn, scale, amax_history, compute_dtype
   )
   return qin
 
 
-def in_qdq_fwd(compute_dtype, inp, scale, amax_history):
-  qin, new_scale, new_history = qdq_and_return(
+def in_qdq_fwd(compute_dtype, inp, amax_history):
+  scale = compute_sf_from_ah(amax_history, jnp.float8_e4m3fn)
+  qin, new_history = qdq_and_return(
     inp, jnp.float8_e4m3fn, scale, amax_history, compute_dtype
   )
-  return qin, (new_scale, new_history)
+  return qin, new_history
 
 
 def in_qdq_bwd(compute_dtype, res, g):
-  new_scale, new_history = res
+  new_history = res
   q_g = g
-  return q_g, new_scale, new_history
+  return q_g, new_history
 
 
 in_qdq.defvjp(in_qdq_fwd, in_qdq_bwd)
 
 
 @partial(custom_vjp, nondiff_argnums=(0,))
-def out_qdq(compute_dtype, out, scale, amax_history):
+def out_qdq(compute_dtype, out, amax_history):
   return out
 
 
-def out_qdq_fwd(compute_dtype, out, scale, amax_history):
-  return out, (scale, amax_history)
+def out_qdq_fwd(compute_dtype, out, amax_history):
+  return out, amax_history
 
 
 def out_qdq_bwd(compute_dtype, res, g):
-  scale, amax_history = res
-  q_g, new_scale, new_history = qdq_and_return(
+  amax_history = res
+  scale = compute_sf_from_ah(amax_history, jnp.float8_e5m2)
+  q_g, new_history = qdq_and_return(
     g, jnp.float8_e5m2, scale, amax_history, compute_dtype
   )
-  return q_g, new_scale, new_history
+  return q_g, new_history
 
 
 out_qdq.defvjp(out_qdq_fwd, out_qdq_bwd)
